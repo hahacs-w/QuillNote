@@ -1,0 +1,26 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+        <linearGradient id="gradPink" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#FF3366"/>
+            <stop offset="100%" stop-color="#FF9933"/>
+        </linearGradient>
+    </defs>
+    
+    <!-- Add transparent padding by scaling the whole icon down to ~86% and centering it -->
+    <g transform="translate(8, 8) scale(0.8666)">
+        <!-- Background -->
+        <rect width="120" height="120" rx="28" fill="#1d3128"/>
+        
+        <!-- Scaled down Q Pattern (70% size, centered) -->
+        <g transform="translate(18, 18) scale(0.7)">
+        <!-- Folded Ribbon Q -->
+        <path d="M 60 15 C 30 15 15 40 15 60 C 15 80 30 105 60 105 C 80 105 95 90 100 70" fill="none" stroke="url(#gradPink)" stroke-width="20" stroke-linecap="round"/>
+        <!-- Pen / Ribbon Tail -->
+        <path d="M 70 70 L 105 105 L 115 115" stroke="url(#gradPink)" stroke-width="20" stroke-linecap="round"/>
+        <!-- Overlay to create fold illusion -->
+        <path d="M 70 70 L 105 105" stroke="#FF3366" stroke-width="20" stroke-linecap="round" opacity="0.5"/>
+        <!-- Dot for ink -->
+        <circle cx="105" cy="25" r="10" fill="#FF9933"/>
+    </g>
+    </g>
+</svg>
