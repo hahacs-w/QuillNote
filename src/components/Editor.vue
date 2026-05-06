@@ -32,6 +32,14 @@
       </div>
       <div class="right-actions">
         <button 
+          v-if="isMainDraft"
+          class="filter-btn links-btn"
+          @click="emit('open-files')"
+          title="管理文件"
+        >
+          文件
+        </button>
+        <button 
           class="filter-btn links-btn"
           @click="emit('open-links')"
           title="管理外链"
@@ -221,12 +229,15 @@ const props = defineProps<{
   familyId?: string; // New prop to identify the draft family (main draft id)
 }>();
 
+const isMainDraft = computed(() => props.familyId === props.draftId);
+
 const emit = defineEmits<{
   (e: 'toggle-focus'): void;
   (e: 'bookmark-set', digit: number): void;
   (e: 'bookmark-not-found', digit: number): void;
   (e: 'clear-jump'): void;
   (e: 'open-links'): void;
+  (e: 'open-files'): void;
   (e: 'jump-to-draft', payload: { draftId: string, pos: number }): void;
 }>();
 
@@ -586,6 +597,18 @@ const checkScroll = () => {
       isScrolling = false;
     });
     isScrolling = true;
+  }
+};
+
+const handleWheel = (e: WheelEvent) => {
+  if (e.ctrlKey || e.metaKey) return;
+  const target = document.querySelector('.editor-content');
+  if (target) {
+    if (e.deltaY !== 0 || e.deltaX !== 0) {
+      e.preventDefault();
+      target.scrollTop += e.deltaY * 0.4;
+      target.scrollLeft += e.deltaX * 0.4;
+    }
   }
 };
 
@@ -951,6 +974,8 @@ onMounted(async () => {
       BookmarkNode,
     ],
     editorProps: {
+      scrollThreshold: 80,
+      scrollMargin: 80,
       handleDOMEvents: {
         copy: (view, event) => {
           if (!isRichText.value) {
@@ -1056,6 +1081,7 @@ onMounted(async () => {
   const container = document.querySelector('.editor-content');
   if (container) {
     container.addEventListener('scroll', checkScroll);
+    container.addEventListener('wheel', handleWheel, { passive: false });
   }
   
   const win = getCurrentWindow();
@@ -1081,6 +1107,7 @@ onUnmounted(() => {
   const container = document.querySelector('.editor-content');
   if (container) {
     container.removeEventListener('scroll', checkScroll);
+    container.removeEventListener('wheel', handleWheel);
   }
   if (editor.value) {
     const existing = globalEditorState.get(props.draftId) || { scrollTop: 0 };
@@ -1361,7 +1388,7 @@ defineExpose({
 .editor-content {
   flex: 1;
   overflow-y: auto;
-  padding: 0 120px 40px 40px;
+  padding: 0 120px 70px 40px;
   font-family: "Sarasa Gothic TC", "更紗黑體 TC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 13px;
   outline: none;
@@ -1627,7 +1654,7 @@ defineExpose({
 }
 
 .scroll-to-bottom {
-  bottom: 24px;
+  bottom: 50px;
 }
 
 .fade-enter-active,

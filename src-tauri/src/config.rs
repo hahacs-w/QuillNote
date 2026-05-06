@@ -73,11 +73,8 @@ pub fn save_config(
 
     // 1. Handle storage path migration if it changed
     if new_config.storage_path != old_storage_path {
-        // Update recent_storage_paths
-        let mut recents = {
-            let config = state.0.lock().unwrap();
-            config.recent_storage_paths.clone()
-        };
+        // Update recent_storage_paths using the one from frontend as base
+        let mut recents = new_config.recent_storage_paths.clone();
         
         // Remove the new path if it was already in recents
         recents.retain(|p| p != &new_config.storage_path);
@@ -153,9 +150,6 @@ pub fn save_config(
             let new_conn = crate::db_cmds::init_db(&new_config).map_err(|e| e.to_string())?;
             *conn_lock = new_conn;
         }
-    } else {
-        // Even if path didn't change, preserve recents from current state
-        new_config.recent_storage_paths = state.0.lock().unwrap().recent_storage_paths.clone();
     }
 
     // 2. Save to config file

@@ -68,6 +68,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            let _ = app.get_webview_window("main").map(|w| w.set_focus());
+        }))
         .setup(|app| {
             // Setup Tray
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -111,11 +115,19 @@ pub fn run() {
             fs_cmds::get_draft_modified_time,
             fs_cmds::save_export_text,
             fs_cmds::save_export_binary,
+            fs_cmds::get_draft_files,
+            fs_cmds::copy_file_to_draft,
+            fs_cmds::save_file_attachment,
+            fs_cmds::delete_draft_file_attachment,
+            fs_cmds::open_draft_file,
+            fs_cmds::open_draft_attachments_dir,
             db_cmds::get_folders,
             db_cmds::create_folder,
             db_cmds::rename_folder,
             db_cmds::delete_folder,
             db_cmds::get_drafts,
+            db_cmds::get_draft_by_id,
+            db_cmds::duplicate_draft,
             db_cmds::create_draft,
             db_cmds::get_sub_drafts,
             db_cmds::create_sub_draft,

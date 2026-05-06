@@ -207,6 +207,78 @@ pub fn get_drafts(state: State<DbState>, folder_id: Option<String>, tag_id: Opti
     Ok(drafts)
 }
 
+#[tauri::command]
+pub fn get_draft_by_id(state: State<DbState>, id: String) -> Result<DraftMeta, String> {
+    let conn = state.conn.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT id, title, content_file, folder_id, created_at, updated_at, parent_id FROM drafts WHERE id = ?1").map_err(|e| e.to_string())?;
+    
+    let draft = stmt.query_row([id], |row| {
+        Ok(DraftMeta {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            content_file: row.get(2)?,
+            folder_id: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+            parent_id: row.get(6)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    Ok(draft)
+}
+
+#[tauri::command]
+pub fn duplicate_draft(state: State<DbState>, config_state: State<ConfigState>, id: String) -> Result<DraftMeta, String> {
+    let draft = get_draft_by_id(state.clone(), id.clone())?;
+    let new_id = Uuid::new_v4().to_string();
+    let new_content_file = format!("{}.html", new_id);
+    let now = Utc::now().to_rfc3339();
+
+    // 1. Copy file content
+    let drafts_dir = {
+        let config = config_state.inner().0.lock().unwrap();
+        std::path::PathBuf::from(&config.storage_path)
+    };
+    
+    let mut old_path = drafts_dir.clone();
+    old_path.push(&draft.content_file);
+    
+    let mut new_path = drafts_dir.clone();
+    new_path.push(&new_content_file);
+    
+    if old_path.exists() {
+        fs::copy(old_path, new_path).map_err(|e| e.to_string())?;
+    } else {
+        fs::write(new_path, "").map_err(|e| e.to_string())?;
+    }
+
+    // 2. Insert DB record
+    let conn = state.conn.lock().unwrap();
+    conn.execute(
+        "INSERT INTO drafts (id, title, content_file, folder_id, created_at, updated_at, parent_id) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            new_id, 
+            format!("{} (Copy)", draft.title), 
+            new_content_file, 
+            draft.folder_id, 
+            now, 
+            now, 
+            draft.parent_id
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(DraftMeta {
+        id: new_id,
+        title: format!("{} (Copy)", draft.title),
+        content_file: new_content_file,
+        folder_id: draft.folder_id,
+        created_at: now.clone(),
+        updated_at: now,
+        parent_id: draft.parent_id,
+    })
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GlobalSearchResult {
     pub draft: DraftMeta,

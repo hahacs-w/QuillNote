@@ -18,7 +18,8 @@
         "height": 600,
         "visible": true,
         "decorations": false,
-        "transparent": true
+        "transparent": true,
+        "shadow": false
       }
     ],
     "security": {
@@ -35,5 +36,12 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["x-quillnote-item"]
+      }
+    }
   }
 }

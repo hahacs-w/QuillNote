@@ -118,6 +118,7 @@
             @click="selectDraft(draft)"
             @dblclick="startRenameDraft(draft)"
             @mousedown="onDraftMouseDown($event, draft)"
+            @contextmenu.prevent="showDraftContextMenu($event, draft)"
           >
             <template v-if="renamingDraftId === draft.id">
               <input 
@@ -144,6 +145,7 @@
             class="draft-item"
             :class="{ active: activeDraft?.id === result.draft.id }"
             @click="selectDraft(result.draft)"
+            @contextmenu.prevent="showDraftContextMenu($event, result.draft)"
           >
             <div class="draft-title">{{ result.draft.title || 'Untitled Draft' }}</div>
             <div class="draft-excerpt">{{ result.excerpt }}</div>
@@ -230,6 +232,7 @@
              @bookmark-not-found="onBookmarkNotFound"
              @clear-jump="pendingBookmarkDigit = null; pendingJumpPos = null"
              @open-links="openLinksModal"
+             @open-files="openFilesModal"
              @jump-to-draft="handleJumpToDraft"
            />
            
@@ -281,8 +284,13 @@
     </main>
 
     <!-- Links Modal -->
-    <div v-if="showLinksModal" class="modal-overlay" @click="showLinksModal = false">
-      <div class="modal-content" @click.stop>
+    <div 
+      v-if="showLinksModal" 
+      class="modal-overlay" 
+      @mousedown.self="isMouseDownOnLinksOverlay = true"
+      @mouseup.self="handleLinksOverlayMouseUp"
+    >
+      <div class="modal-content">
         <h3 class="modal-title">外部链接 (External Links)</h3>
         
         <div class="links-list">
@@ -328,8 +336,103 @@
       </div>
     </div>
 
+    <!-- Files Modal -->
+    <div 
+      v-if="showFilesModal" 
+      class="modal-overlay files-modal-overlay" 
+      @mousedown.self="isMouseDownOnFilesOverlay = true"
+      @mouseup.self="handleFilesOverlayMouseUp"
+      @dragenter.prevent
+      @dragover.prevent="isDraggingOverFiles = true"
+      @dragleave.prevent="isDraggingOverFiles = false"
+      @drop.prevent="handleFileDrop"
+    >
+      <div class="modal-content files-modal-content">
+        <h3 class="modal-title">文件区 (Files)</h3>
+        <p class="modal-subtitle">支持拖拽文件到此窗口。这些文件属于主页面：{{ activeDraft?.title || 'Untitled' }}</p>
+        
+        <div class="links-list files-list" :class="{ 'drag-over': isDraggingOverFiles }">
+          <div v-for="file in filesList" :key="file" class="link-item file-item">
+            <div class="link-info file-info" @click="openFile(file)" title="Click to open in OS">
+              <div class="link-url">{{ file }}</div>
+            </div>
+            <div class="link-actions">
+              <button class="delete-link-btn" @click.stop="deleteFile(file)">Del</button>
+            </div>
+          </div>
+          <div v-if="filesList.length === 0" class="empty-links-state" :class="{ 'drag-over-text': isDraggingOverFiles }">
+            {{ isDraggingOverFiles ? '松开以保存文件' : '暂无文件，拖拽文件到这里存储' }}
+          </div>
+        </div>
+        
+        <div class="modal-actions" style="margin-top: 16px;">
+          <div style="flex: 1;"></div>
+          <button class="primary-btn" @click="openFilesDirectory" style="margin-right: 8px;">打开文件夹</button>
+          <button class="cancel-btn" @click="showFilesModal = false; removeFileDropListeners()">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Draft Context Menu -->
+    <div 
+      v-if="draftContextMenu.visible" 
+      class="export-menu draft-context-menu" 
+      :style="{ top: draftContextMenu.y + 'px', left: draftContextMenu.x + 'px', display: 'block' }"
+      v-click-outside="closeDraftContextMenu"
+    >
+      <div class="export-item" @click="copyDraftLink(draftContextMenu.draft)">Copy Item Link</div>
+      <div class="export-item" @click="contextMenuRename(draftContextMenu.draft)">Rename</div>
+      <div class="export-item" @click="contextMenuDuplicate(draftContextMenu.draft)">Duplicate</div>
+      <div class="export-item" @click="contextMenuReveal(draftContextMenu.draft)">Reveal in Finder</div>
+      <div class="menu-divider"></div>
+      <div class="export-item" @click="contextMenuExport(draftContextMenu.draft, 'txt')">Export as TXT</div>
+      <div class="export-item" @click="contextMenuExport(draftContextMenu.draft, 'pdf')">Export as PDF</div>
+      <div class="export-item" @click="contextMenuExport(draftContextMenu.draft, 'word')">Export as Word</div>
+      <div class="menu-divider"></div>
+      <div class="export-item delete-item" @click="contextMenuDelete(draftContextMenu.draft)">Delete</div>
+    </div>
+
     <!-- Settings Modal -->
     <Settings v-if="showSettings" @close="handleSettingsClose" />
+
+    <!-- Alfred-style Global Search Overlay -->
+    <Transition name="search-fade">
+      <div 
+        v-if="showGlobalSearchOverlay" 
+        class="alfred-search-overlay"
+        @mousedown.self="closeGlobalSearch"
+      >
+        <div class="alfred-search-modal">
+          <input 
+            v-model="overlaySearchQuery"
+            @input="performOverlaySearch"
+            @keydown.down.prevent="navigateOverlay(1)"
+            @keydown.up.prevent="navigateOverlay(-1)"
+            @keydown.enter.prevent="selectOverlayResult"
+            @keydown.esc.prevent="closeGlobalSearch"
+            class="alfred-search-input"
+            ref="overlayInputRef"
+            placeholder="Global Search Notes..."
+          />
+          <div v-if="overlaySearchResults.length > 0" class="alfred-results-list">
+            <div 
+              v-for="(result, index) in overlaySearchResults" 
+              :key="result.draft.id"
+              class="alfred-result-item"
+              :class="{ selected: index === overlaySelectedIndex }"
+              @click="handleOverlaySelect(result)"
+              @mouseenter="overlaySelectedIndex = index"
+            >
+              <div class="alfred-result-title">{{ result.draft.title || 'Untitled Draft' }}</div>
+              <div class="alfred-result-excerpt">{{ result.excerpt }}</div>
+            </div>
+          </div>
+          <div v-else-if="overlaySearchQuery.trim()" class="alfred-empty-state">
+            No results found.
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -338,6 +441,8 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { save } from '@tauri-apps/plugin-dialog';
+import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
+import { listen } from '@tauri-apps/api/event';
 import html2pdf from 'html2pdf.js';
 import { asBlob } from 'html-docx-js-typescript';
 import Editor from './components/Editor.vue';
@@ -351,6 +456,136 @@ const drafts = ref<DraftMeta[]>([]);
 const activeFolderId = ref<string | null>(null);
 const activeTagId = ref<string | null>(null);
 const activeDraft = ref<DraftMeta | null>(null);
+
+const draftContextMenu = ref({ visible: false, x: 0, y: 0, draft: null as DraftMeta | null });
+
+const showDraftContextMenu = (e: MouseEvent, draft: DraftMeta) => {
+  draftContextMenu.value = {
+    visible: true,
+    x: e.clientX,
+    y: e.clientY,
+    draft
+  };
+};
+
+const closeDraftContextMenu = () => {
+  draftContextMenu.value.visible = false;
+};
+
+const copyDraftLink = async (draft: DraftMeta | null) => {
+  if (!draft) return;
+  const link = `x-quillnote-item://${draft.id}`;
+  try {
+    await navigator.clipboard.writeText(link);
+  } catch (err) {
+    console.error("Failed to copy: ", err);
+  }
+  closeDraftContextMenu();
+};
+
+const contextMenuRename = (draft: DraftMeta | null) => {
+  if (!draft) return;
+  closeDraftContextMenu();
+  startRenameDraft(draft);
+};
+
+const contextMenuDuplicate = async (draft: DraftMeta | null) => {
+  if (!draft) return;
+  closeDraftContextMenu();
+  try {
+    const newDraft: DraftMeta = await invoke('duplicate_draft', { id: draft.id });
+    await loadDrafts();
+    if (draft.parent_id) {
+        await loadSubDrafts(draft.parent_id);
+    }
+    selectDraft(newDraft);
+  } catch (e) {
+    console.error("Failed to duplicate:", e);
+  }
+};
+
+const contextMenuReveal = async (draft: DraftMeta | null) => {
+  if (!draft || !appConfig.value) return;
+  closeDraftContextMenu();
+  try {
+    await invoke('open_in_os', { path: appConfig.value.storage_path });
+  } catch (e) {
+    console.error("Failed to reveal:", e);
+  }
+};
+
+const contextMenuExport = (draft: DraftMeta | null, format: 'txt' | 'word' | 'pdf' | 'html') => {
+  if (!draft) return;
+  closeDraftContextMenu();
+  // Ensure the draft is selected before exporting
+  if (activeDraft.value?.id !== draft.id && !subDrafts.value.some(s => s.id === draft.id)) {
+      selectDraft(draft).then(() => exportFormat(format));
+  } else {
+      exportFormat(format);
+  }
+};
+
+const contextMenuDelete = async (draft: DraftMeta | null) => {
+  if (!draft) return;
+  closeDraftContextMenu();
+  if (confirm(`Are you sure you want to delete "${draft.title || 'Untitled Draft'}"?`)) {
+    await invoke('delete_draft_meta', { id: draft.id });
+    await invoke('delete_draft_file', { filename: draft.content_file });
+    
+    if (activeDraft.value?.id === draft.id) {
+        activeDraft.value = null;
+        currentDraftTags.value = [];
+        subDrafts.value = [];
+    } else {
+        const subIdx = subDrafts.value.findIndex(s => s.id === draft.id);
+        if (subIdx !== -1) {
+            subDrafts.value.splice(subIdx, 1);
+            if (activeSubDraft.value?.id === draft.id) {
+                activeSubDraft.value = null;
+            }
+        }
+    }
+
+    if (isGlobalSearching.value) {
+      performGlobalSearch();
+    } else {
+      await loadDrafts();
+    }
+  }
+};
+
+const jumpToDraftById = async (id: string) => {
+  console.log("Deep link jump to ID:", id);
+  try {
+    const draft: DraftMeta = await invoke('get_draft_by_id', { id });
+    console.log("Jump target draft found:", draft);
+
+    if (draft.parent_id) {
+      const parentDraft: DraftMeta = await invoke('get_draft_by_id', { id: draft.parent_id });
+      await selectFolder(parentDraft.folder_id);
+      await selectDraft(parentDraft);
+      // Wait for subDrafts to be populated
+      await nextTick();
+      const sub = subDrafts.value.find(s => s.id === draft.id);
+      if (sub) {
+        console.log("Switching to sub-tab:", sub.title);
+        switchToSubTab(sub);
+      } else {
+        // Retry once after a short delay if subDrafts not loaded yet
+        setTimeout(async () => {
+            await loadSubDrafts(parentDraft.id);
+            const retrySub = subDrafts.value.find(s => s.id === draft.id);
+            if (retrySub) switchToSubTab(retrySub);
+        }, 100);
+      }
+    } else {
+      await selectFolder(draft.folder_id);
+      await selectDraft(draft);
+    }
+  } catch (e) {
+    console.error('Failed to jump to draft:', e);
+  }
+};
 
 const subDrafts = ref<DraftMeta[]>([]);
 const activeSubDraft = ref<DraftMeta | null>(null);
@@ -388,6 +623,186 @@ const newLinkField1 = ref('');
 const newLinkField2 = ref('');
 const editingLinkId = ref<string | null>(null);
 const selectedOwnerDraftId = ref<string | null>(null);
+
+const isMouseDownOnLinksOverlay = ref(false);
+const handleLinksOverlayMouseUp = () => {
+  if (isMouseDownOnLinksOverlay.value) {
+    showLinksModal.value = false;
+  }
+  isMouseDownOnLinksOverlay.value = false;
+};
+
+// --- Files Modal State & Methods ---
+const showFilesModal = ref(false);
+const isMouseDownOnFilesOverlay = ref(false);
+const isDraggingOverFiles = ref(false);
+const filesList = ref<string[]>([]);
+
+const handleFilesOverlayMouseUp = () => {
+  if (isMouseDownOnFilesOverlay.value) {
+    showFilesModal.value = false;
+    removeFileDropListeners();
+  }
+  isMouseDownOnFilesOverlay.value = false;
+};
+
+const loadFiles = async () => {
+  if (!activeDraft.value) return;
+  try {
+    filesList.value = await invoke('get_draft_files', { draftId: activeDraft.value.id });
+  } catch (e) {
+    console.error("Failed to load files:", e);
+  }
+};
+
+let unlistenDragDrop: (() => void) | null = null;
+
+const handleFilePaste = async (e: ClipboardEvent) => {
+  if (!showFilesModal.value || !activeDraft.value) return;
+
+  const items = e.clipboardData?.items;
+  if (!items) return;
+
+  let pastedFiles = false;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (file) {
+        pastedFiles = true;
+        
+        let fileName = file.name;
+        // Provide a unique name for clipboard images if they have generic names
+        if (fileName === 'image.png' || fileName === 'image.jpg') {
+            const ext = fileName.split('.').pop();
+            fileName = `Pasted_Image_${Date.now()}.${ext}`;
+        }
+        
+        try {
+          const buffer = await file.arrayBuffer();
+          const uint8Array = new Uint8Array(buffer);
+          await invoke('save_file_attachment', { 
+            draftId: activeDraft.value.id, 
+            fileName: fileName, 
+            content: Array.from(uint8Array) 
+          });
+        } catch (err) {
+          console.error("Failed to save pasted file:", err);
+        }
+      }
+    }
+  }
+
+  if (pastedFiles) {
+    loadFiles();
+  }
+};
+
+const setupFileDropListeners = async () => {
+  if (unlistenDragDrop) return; // already listening
+
+  window.addEventListener('paste', handleFilePaste);
+
+  const win = getCurrentWindow();
+  console.log("Setting up file drop listeners on window");
+  unlistenDragDrop = await win.onDragDropEvent(async (event) => {
+    console.log("DragDropEvent fired: ", event);
+    if (event.payload.type === 'over') {
+      if (showFilesModal.value) {
+        isDraggingOverFiles.value = true;
+      }
+    } else if (event.payload.type === 'leave') {
+      isDraggingOverFiles.value = false;
+    } else if (event.payload.type === 'drop') {
+      isDraggingOverFiles.value = false;
+      if (!showFilesModal.value || !activeDraft.value) return;
+
+      const paths = event.payload.paths;
+      console.log("Dropped paths:", paths);
+      if (paths && paths.length > 0) {
+        for (const p of paths) {
+          try {
+            console.log("Invoking copy_file_to_draft with path:", p);
+            await invoke('copy_file_to_draft', { draftId: activeDraft.value.id, sourcePath: p });
+          } catch (err) {
+            console.error("Failed to copy dropped file:", err);
+          }
+        }
+        loadFiles();
+      }
+    }
+  });
+};
+
+const removeFileDropListeners = () => {
+  window.removeEventListener('paste', handleFilePaste);
+  if (unlistenDragDrop) { 
+    unlistenDragDrop(); 
+    unlistenDragDrop = null; 
+  }
+};
+
+const openFilesModal = () => {
+  if (!activeDraft.value) return;
+  showFilesModal.value = true;
+  loadFiles();
+  setupFileDropListeners();
+};
+
+const handleFileDrop = async (e: DragEvent) => {
+  isDraggingOverFiles.value = false;
+  if (!activeDraft.value) return;
+  
+  if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+    for (let i = 0; i < e.dataTransfer.files.length; i++) {
+      const file = e.dataTransfer.files[i] as File & { path?: string };
+      // Fallback: read file as ArrayBuffer and send bytes to Tauri
+      try {
+        const buffer = await file.arrayBuffer();
+        const uint8Array = new Uint8Array(buffer);
+        await invoke('save_file_attachment', { 
+          draftId: activeDraft.value.id, 
+          fileName: file.name, 
+          content: Array.from(uint8Array) 
+        });
+      } catch (err) {
+        console.error("Failed to save dropped file via ArrayBuffer:", err);
+      }
+    }
+    loadFiles();
+  }
+};
+
+const deleteFile = async (fileName: string) => {
+  if (!activeDraft.value) return;
+  if (confirm(`Are you sure you want to delete "${fileName}"?`)) {
+    try {
+      await invoke('delete_draft_file_attachment', { draftId: activeDraft.value.id, fileName });
+      loadFiles();
+    } catch (e) {
+      console.error("Failed to delete file:", e);
+    }
+  }
+};
+
+const openFile = async (fileName: string) => {
+  if (!activeDraft.value) return;
+  try {
+    await invoke('open_draft_file', { draftId: activeDraft.value.id, fileName });
+  } catch (e) {
+    console.error("Failed to open file:", e);
+  }
+};
+
+const openFilesDirectory = async () => {
+  if (!activeDraft.value) return;
+  try {
+    await invoke('open_draft_attachments_dir', { draftId: activeDraft.value.id });
+  } catch (e) {
+    console.error("Failed to open directory:", e);
+  }
+};
 
 const ownerDrafts = computed(() => {
   if (!activeDraft.value) return [];
@@ -627,6 +1042,64 @@ const globalSearchQuery = ref('');
 const isGlobalSearching = ref(false);
 const searchResults = ref<GlobalSearchResult[]>([]);
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+
+// Alfred-style Global Search Overlay State
+const showGlobalSearchOverlay = ref(false);
+const overlaySearchQuery = ref('');
+const overlaySearchResults = ref<GlobalSearchResult[]>([]);
+const overlaySelectedIndex = ref(0);
+const overlayInputRef = ref<HTMLInputElement | null>(null);
+
+const openGlobalSearch = () => {
+  showGlobalSearchOverlay.value = true;
+  overlaySearchQuery.value = '';
+  overlaySearchResults.value = [];
+  overlaySelectedIndex.value = 0;
+  nextTick(() => {
+    overlayInputRef.value?.focus();
+  });
+};
+
+const closeGlobalSearch = () => {
+  showGlobalSearchOverlay.value = false;
+};
+
+const performOverlaySearch = () => {
+  if (searchTimeout) clearTimeout(searchTimeout);
+  if (!overlaySearchQuery.value.trim()) {
+    overlaySearchResults.value = [];
+    return;
+  }
+  
+  searchTimeout = setTimeout(async () => {
+    try {
+      overlaySearchResults.value = await invoke('global_search', { query: overlaySearchQuery.value });
+      overlaySelectedIndex.value = 0;
+    } catch (e) {
+      console.error("Overlay search error:", e);
+    }
+  }, 200);
+};
+
+const navigateOverlay = (direction: number) => {
+  if (overlaySearchResults.value.length === 0) return;
+  const newIndex = overlaySelectedIndex.value + direction;
+  if (newIndex >= 0 && newIndex < overlaySearchResults.value.length) {
+    overlaySelectedIndex.value = newIndex;
+  }
+};
+
+const selectOverlayResult = async () => {
+  const selected = overlaySearchResults.value[overlaySelectedIndex.value];
+  if (selected) {
+    await handleOverlaySelect(selected);
+  }
+};
+
+const handleOverlaySelect = async (result: GlobalSearchResult) => {
+  closeGlobalSearch();
+  await jumpToDraftById(result.draft.id);
+};
 
 const isFocusMode = ref(false);
 const showSettings = ref(false);
@@ -1097,8 +1570,21 @@ const formatDate = (isoString: string) => {
 };
 
 let lastMetaPressTime = 0;
+let lastShiftPressTime = 0;
 
 const handleGlobalKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Shift') {
+    const now = Date.now();
+    if (now - lastShiftPressTime < 400) {
+      openGlobalSearch();
+      lastShiftPressTime = 0;
+    } else {
+      lastShiftPressTime = now;
+    }
+  }
+
+  if (showGlobalSearchOverlay.value) return;
+
   if (!activeDraft.value) return;
 
   if (e.key === 'Meta') {
@@ -1155,6 +1641,29 @@ onMounted(async () => {
   await loadDrafts();
   await loadAppConfig();
   window.addEventListener('keydown', handleGlobalKeydown);
+
+  try {
+    const initialUrls = await getCurrent();
+    if (initialUrls && initialUrls.length > 0) {
+      for (const url of initialUrls) {
+        if (url.startsWith('x-quillnote-item://')) {
+          const id = url.replace('x-quillnote-item://', '').replace(/\//g, '');
+          await jumpToDraftById(id);
+        }
+      }
+    }
+
+    await onOpenUrl(async (urls) => {
+      for (const url of urls) {
+        if (url.startsWith('x-quillnote-item://')) {
+          const id = url.replace('x-quillnote-item://', '').replace(/\//g, '');
+          await jumpToDraftById(id);
+        }
+      }
+    });
+  } catch (e) {
+    console.error("Failed to set up deep linking:", e);
+  }
 });
 
 onUnmounted(() => {
@@ -1198,6 +1707,11 @@ body, html, #app {
   -webkit-user-select: none;
 }
 
+#app {
+  padding: 10px; /* Space for the shadow to render without being clipped */
+  box-sizing: border-box;
+}
+
 /* Allow drag-and-drop on draft items */
 .draft-item {
   -webkit-user-drag: element;
@@ -1210,13 +1724,13 @@ body, html, #app {
   grid-template-columns: 200px 250px 1fr;
   height: 100%;
   width: 100%;
-  border-radius: 12px; /* Apple Notes style rounded corners */
+  border-radius: 28px; /* Further increased for even rounder corners */
   border: 1px solid var(--border-color);
   overflow: hidden; /* Crucial: clips children to the border radius */
   background-color: var(--bg-editor);
   position: relative;
   /* Add a subtle shadow to make the white window pop against the desktop */
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15); 
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2); 
 }
 
 .window-drag-bar {
@@ -1524,8 +2038,11 @@ body, html, #app {
 
 .draggable-sub-tabs {
   position: absolute;
-  bottom: 24px;
-  right: 64px; /* Default right position avoiding scroll btn */
+  bottom: 10px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: max-content;
   z-index: 100;
   cursor: grab;
   box-shadow: 0 4px 16px rgba(0,0,0,0.15);
@@ -1674,6 +2191,20 @@ body, html, #app {
   color: var(--active-text);
 }
 
+.draft-context-menu {
+  position: fixed;
+  z-index: 10000;
+  margin: 0;
+}
+
+.delete-item {
+  color: #ff3b30 !important;
+}
+
+.delete-item:hover {
+  background-color: rgba(255, 59, 48, 0.1) !important;
+}
+
 /* Tags Bar */
 .editor-tags-bar {
   padding: 0 24px 12px 24px;
@@ -1764,7 +2295,7 @@ body, html, #app {
 
 .modal-content {
   background-color: var(--bg-editor);
-  border-radius: 12px;
+  border-radius: 24px; /* Increased to match the much rounder app window */
   width: 480px;
   max-height: 80vh;
   display: flex;
@@ -1787,6 +2318,24 @@ body, html, #app {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 8px;
+  transition: all 0.2s;
+}
+
+.files-list.drag-over {
+  border-color: #007aff;
+  background-color: rgba(0, 122, 255, 0.05);
+}
+
+.modal-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: -10px;
+  margin-bottom: 12px;
+}
+
+.drag-over-text {
+  color: #007aff !important;
+  font-weight: 500;
 }
 
 .link-item {
@@ -1930,5 +2479,92 @@ body, html, #app {
 .links-btn:hover {
   background-color: rgba(0, 122, 255, 0.1);
 }
+
+/* Alfred-style Search Overlay Styles */
+.alfred-search-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  z-index: 10000;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 15vh;
+}
+
+.alfred-search-modal {
+  width: 640px;
+  max-height: 70vh;
+  background-color: var(--bg-editor);
+  border-radius: 14px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.alfred-search-input {
+  width: 100%;
+  padding: 22px 28px;
+  font-size: 24px;
+  font-weight: 500;
+  border: none;
+  outline: none;
+  background-color: transparent;
+  color: var(--text-primary);
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  font-family: inherit;
+}
+
+.alfred-results-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.alfred-result-item {
+  padding: 14px 28px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-left: 4px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.alfred-result-item:hover, .alfred-result-item.selected {
+  background-color: rgba(0, 122, 255, 0.1);
+}
+
+.alfred-result-item.selected {
+  border-left-color: #007aff;
+}
+
+.alfred-result-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.alfred-result-excerpt {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+}
+
+.alfred-empty-state {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 15px;
+  opacity: 0.7;
+}
+
+/* Reuse search-fade transition */
 </style>
 

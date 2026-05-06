@@ -1,5 +1,9 @@
 <template>
-  <div class="settings-overlay" @click.self="$emit('close')">
+  <div 
+    class="settings-overlay" 
+    @mousedown.self="isMouseDownOnOverlay = true" 
+    @mouseup.self="handleOverlayMouseUp"
+  >
     <div class="settings-modal">
       <div class="settings-header">
         <h2>Settings</h2>
@@ -44,10 +48,21 @@
               v-for="path in config.recent_storage_paths" 
               :key="path" 
               class="recent-path-item"
-              @click="switchRecentPath(path)"
-              title="Click to switch to this path"
             >
-              {{ path }}
+              <span 
+                class="recent-path-text"
+                @click="switchRecentPath(path)"
+                title="Click to switch to this path"
+              >
+                {{ path }}
+              </span>
+              <button 
+                class="remove-path-btn" 
+                @click.stop="removeRecentPath(path)"
+                title="Remove from list"
+              >
+                &times;
+              </button>
             </div>
           </div>
           <p class="settings-hint">The directory where your SQLite database and HTML drafts are stored.</p>
@@ -109,6 +124,15 @@ const config = ref<AppConfig>({
   recent_storage_paths: []
 });
 
+const isMouseDownOnOverlay = ref(false);
+
+const handleOverlayMouseUp = () => {
+  if (isMouseDownOnOverlay.value) {
+    emit('close');
+  }
+  isMouseDownOnOverlay.value = false;
+};
+
 const loadConfig = async () => {
   config.value = await invoke('get_config');
 };
@@ -135,6 +159,17 @@ const recordHotkey = (e: KeyboardEvent, field: keyof AppConfig) => {
 const switchRecentPath = async (path: string) => {
   config.value.storage_path = path;
   await saveSettings();
+};
+
+const removeRecentPath = async (path: string) => {
+  config.value.recent_storage_paths = config.value.recent_storage_paths.filter(p => p !== path);
+  try {
+    await invoke('save_config', { newConfig: config.value });
+  } catch (e) {
+    alert('Error removing path: ' + e);
+    // Reload config if save failed to revert UI
+    await loadConfig();
+  }
 };
 
 const saveSettings = async () => {
@@ -168,7 +203,7 @@ onMounted(loadConfig);
 .settings-modal {
   background: var(--bg-editor);
   width: 450px;
-  border-radius: 12px;
+  border-radius: 24px; /* Increased to match the much rounder app window */
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
@@ -259,20 +294,48 @@ onMounted(loadConfig);
 }
 
 .recent-path-item {
-  font-size: 12px;
-  color: #007aff;
-  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   padding: 4px 6px;
   border-radius: 4px;
-  word-break: break-all;
-  white-space: normal;
-  line-height: 1.4;
   transition: background-color 0.2s;
 }
 
 .recent-path-item:hover {
   background-color: rgba(0, 122, 255, 0.1);
+}
+
+.recent-path-text {
+  font-size: 12px;
+  color: #007aff;
+  cursor: pointer;
+  word-break: break-all;
+  white-space: normal;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.recent-path-text:hover {
   text-decoration: underline;
+}
+
+.remove-path-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 8px;
+  opacity: 0.5;
+  transition: opacity 0.2s, color 0.2s;
+  line-height: 1;
+}
+
+.remove-path-btn:hover {
+  opacity: 1;
+  color: #ff3b30;
 }
 
 .settings-slider {

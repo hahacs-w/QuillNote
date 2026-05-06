@@ -32,4 +32,6 @@ chrono = { version = "0.4.44", features = ["serde"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
 open = "5.3.4"
+tauri-plugin-deep-link = "2.4.9"
+tauri-plugin-single-instance = { version = "2.4.2", features = ["deep-link"] }
 
